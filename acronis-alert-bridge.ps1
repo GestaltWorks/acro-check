@@ -65,9 +65,23 @@ if (-not $DryRun -and -not $WebhookUrl) { throw "Set -WebhookUrl or the ACRONIS_
 
 $rank = @{ ok = 0; information = 1; warning = 2; error = 3; critical = 4 }
 $minRank = $rank[$MinSeverity]
-# Acronis sets the severity (a disk speed anomaly is "warning", malware is "critical"). Colors follow it.
+# Acronis sets the severity (a disk speed anomaly is "warning", a failed backup "critical").
+# Colors follow it, except security detections, which count as critical (see Get-Sev).
 $consoleColor = @{ critical = "Red"; error = "Red"; warning = "Yellow"; information = "Cyan"; ok = "Green" }
 $cardColor    = @{ critical = "Attention"; error = "Attention"; warning = "Warning"; information = "Accent"; ok = "Good" }
+
+# Acronis rates a malware detection it quarantined as "warning" (every one seen so far:
+# TotalProtectMalwareDetectedOAS/ODS, category "Antimalware protection"). A detection is never
+# a routine warning, so security alerts count as critical for the filter and the colors.
+function Test-Security($a) {
+  ([string]$a.category -match 'Antimalware|Active Protection|Security') -or
+  ([string]$a.type -match 'Malware|Ransomware|Cryptomin|Exploit|Threat')
+}
+function Get-Sev($a) {
+  $s = [string]$a.severity
+  if ((Test-Security $a) -and $rank[$s] -lt $rank["critical"]) { return "critical" }
+  return $s
+}
 
 # ---------------------------------------------------------------------------
 # State: alert ids already posted, and the key that guards the Clear button
@@ -140,7 +154,7 @@ function Get-Facts($a) {
     if ($code) { $facts["error code"] = $code }
     if ($em.kbLink -is [string] -and $em.kbLink -match '^https?://') { $facts["help"] = $em.kbLink }   # often an object of KB lookup keys, not a link
   }
-  $facts["severity"] = [string]$a.severity
+  $facts["severity"] = if ((Get-Sev $a) -ne [string]$a.severity) { "$($a.severity) in Acronis, sent as critical (security detection)" } else { [string]$a.severity }
   $facts["category"] = [string]$a.category
   $facts["raised"]   = Get-When $a.createdAt
   $n = $counts[([string]$a.id).ToUpperInvariant()]
@@ -151,8 +165,14 @@ function Get-Facts($a) {
   $facts["tenant"]   = Get-TenantName $a
   return $facts
 }
+$plainTitle = @{
+  TotalProtectMalwareDetectedOAS = "Malware blocked (real-time protection)"
+  TotalProtectMalwareDetectedODS = "Malware found (scheduled scan)"
+}
 function Get-Title($a) {
-  $what = if (Get-Detail $a "title") { Get-Detail $a "title" } else { ([string]$a.type) -creplace '([a-z])([A-Z])', '$1 $2' }
+  $what = if (Get-Detail $a "title") { Get-Detail $a "title" }
+          elseif ($plainTitle[[string]$a.type]) { $plainTitle[[string]$a.type] }
+          else { ([string]$a.type) -creplace '([a-z])([A-Z])', '$1 $2' }
   $where = Get-Detail $a "resourceName"
   if ($where) { "$what on $where" } else { $what }
 }
@@ -162,7 +182,7 @@ function Get-Emoji([int]$cp) { [char]::ConvertFromUtf32($cp) }   # code points, 
 function New-Payload($a) {
   $title = Get-Title $a
   $facts = Get-Facts $a
-  $dot = @{ critical = 0x1F534; error = 0x1F534; warning = 0x1F7E0; information = 0x1F535; ok = 0x1F7E2 }[[string]$a.severity]
+  $dot = @{ critical = 0x1F534; error = 0x1F534; warning = 0x1F7E0; information = 0x1F535; ok = 0x1F7E2 }[(Get-Sev $a)]
   $sevEmoji = if ($dot) { Get-Emoji $dot } else { "" }
   $n = $counts[([string]$a.id).ToUpperInvariant()]
   $label = if ($n -gt 1) { "Acronis alert, repeat ($n times)" } else { "Acronis alert" }
@@ -175,7 +195,7 @@ function New-Payload($a) {
       $card = @{
         type = "AdaptiveCard"; version = "1.4"; '$schema' = "http://adaptivecards.io/schemas/adaptive-card.json"
         body = @(
-          @{ type = "TextBlock"; text = "$sevEmoji $label"; size = "Small"; weight = "Bolder"; color = $cardColor[[string]$a.severity] },
+          @{ type = "TextBlock"; text = "$sevEmoji $label"; size = "Small"; weight = "Bolder"; color = $cardColor[(Get-Sev $a)] },
           @{ type = "TextBlock"; text = $title; size = "Large"; weight = "Bolder"; wrap = $true },
           @{ type = "FactSet"; facts = @($facts.GetEnumerator() | ForEach-Object { @{ title = $_.Key; value = $_.Value } }) }
         )
@@ -193,7 +213,7 @@ function New-Payload($a) {
         @{ type = "context"; elements = @(@{ type = "mrkdwn"; text = $links }) }) }
     }
     "discord" {
-      $color = @{ critical = 13250098; error = 13250098; warning = 15898933; information = 3112182; ok = 954509 }[[string]$a.severity]
+      $color = @{ critical = 13250098; error = 13250098; warning = 15898933; information = 3112182; ok = 954509 }[(Get-Sev $a)]
       return @{ username = "Acronis alerts"; embeds = @(@{
         title = $title; url = $script:dc; color = $color
         fields = @($facts.GetEnumerator() | ForEach-Object { @{ name = $_.Key; value = $_.Value; inline = $true } }) }) }
@@ -331,7 +351,7 @@ function Invoke-Poll {
   $alerts = @(Clear-Orphans @(Items $resp))
   $active = @{}
   foreach ($a in $alerts) { $active[[string]$a.id] = $a }
-  $new = @($alerts | Where-Object { -not $posted[(Get-Key $_)] -and $rank[[string]$_.severity] -ge $minRank })
+  $new = @($alerts | Where-Object { -not $posted[(Get-Key $_)] -and $rank[(Get-Sev $_)] -ge $minRank })
 
   # Count each new occurrence once, before its card is built (the card shows the count).
   # A failed post is retried next round; $countedKeys stops it being counted twice.
@@ -351,8 +371,8 @@ function Invoke-Poll {
       if (Send-Payload (New-Payload $a)) {
         $posted[(Get-Key $a)] = $true
         $open[[string]$a.id] = $a
-        $c = $consoleColor[[string]$a.severity]; if (-not $c) { $c = "Cyan" }
-        Write-Host "$(Get-Date -Format T)  posted: [$($a.severity)] $(Get-Title $a)" -ForegroundColor $c
+        $c = $consoleColor[(Get-Sev $a)]; if (-not $c) { $c = "Cyan" }
+        Write-Host "$(Get-Date -Format T)  posted: [$(Get-Sev $a)] $(Get-Title $a)" -ForegroundColor $c
       }
     }
   }
@@ -377,10 +397,10 @@ function Invoke-Poll {
   # Status line: green "Ready" when nothing is open, else the count in the color of the worst open alert.
   $at = Get-Date -Format T
   # Alerts below -MinSeverity are counted here but never sent to the channel.
-  $sent  = @($alerts | Where-Object { $rank[[string]$_.severity] -ge $minRank })
-  $below = @($alerts | Where-Object { $rank[[string]$_.severity] -lt $minRank })
+  $sent  = @($alerts | Where-Object { $rank[(Get-Sev $_)] -ge $minRank })
+  $below = @($alerts | Where-Object { $rank[(Get-Sev $_)] -lt $minRank })
   $pick  = if ($sent.Count) { $sent } else { $below }
-  $worst = if ($pick.Count) { [string]@($pick | Sort-Object { $rank[[string]$_.severity] } -Descending)[0].severity } else { "" }
+  $worst = if ($pick.Count) { Get-Sev @($pick | Sort-Object { $rank[(Get-Sev $_)] } -Descending)[0] } else { "" }
   $c = $consoleColor[$worst]; if (-not $c) { $c = "Green" }
   if ($sent.Count)      { Show-Status "Status: $($sent.Count) open ($worst). Nothing new. Checked $at" $c }
   elseif ($below.Count) { Show-Status "Status: Ready. $($below.Count) $worst open, not sent. Checked $at" $c }

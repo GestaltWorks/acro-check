@@ -19,7 +19,7 @@ One PowerShell script plus a helper file. It runs three ways:
 | Clear alert button | A button on the card that dismisses that one alert in Acronis |
 | Repeat alert | The card says "repeat (N times)", with "times seen" and "first reported" |
 | Removed device | Alerts on a device that no longer exists in Acronis are cleared automatically |
-| Severity filter | Only error and critical alerts post by default; warnings stay out of the channel |
+| Severity filter | Only error and critical alerts post by default; warnings stay out of the channel. Malware detections always post: Acronis rates a quarantined one "warning", so the bridge treats security detections as critical |
 | Quiet window | One status line, rewritten in place: green Ready, yellow for warnings, red for error or critical |
 
 ## Set up (about 10 minutes, once)

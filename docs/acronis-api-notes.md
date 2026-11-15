@@ -15,7 +15,8 @@ Behavior seen on the Acronis Cyber Protect Cloud APIs while building acro-check 
 
 - **Repeats reuse the ID.** When a problem comes back, Acronis reopens the alert under the same `id` with a new `createdAt`. `receivedAt` keeps the first report time.
 - **No repeat count.** No field counts how often an alert reopened.
-- **Severity values:** `ok`, `information`, `warning`, `error`, `critical`. There is no "high". A disk speed anomaly is `warning`, and a failed backup or malware detection is `critical`.
+- **Severity values:** `ok`, `information`, `warning`, `error`, `critical`. There is no "high". A disk speed anomaly is `warning` and a failed backup is `critical`.
+- **Malware detections are `warning`.** All 17 seen in one tenant (`TotalProtectMalwareDetectedOAS` for real-time protection, `TotalProtectMalwareDetectedODS` for scans, category "Antimalware protection") were `warning`, the EICAR test file included, because the file was quarantined. A severity filter set to "error and up" silently drops every one. acro-check treats security categories and malware types as critical for that reason.
 - **Device link:** `details.resourceId` (uppercase GUID) and `details.resourceName`.
 - **Removed devices leave alerts open.** Removing a device doesn't clear its alerts.
 - **Errors are nested.** `details.error` is a chain of `{ text, fields, suberror }`. The top layers are generic, and the deepest layer with text is the cause. `details.errorMessage` is an object (`code`, `reason`, `domain`, `kbLink`, `serCode`), not text.

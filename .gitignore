@@ -2,3 +2,4 @@
 acro-check.env.ps1
 # Runtime state: posted alerts, repeat counts, and the Clear button key.
 *.state.json
+.env

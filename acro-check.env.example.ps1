@@ -1,5 +1,6 @@
-# Copy this file to acro-check.env.ps1 (git ignores that name) and fill in the four values.
-# The bridge loads acro-check.env.ps1 by itself when the window has no ACRONIS_* variables set.
+# Copy this file to %USERPROFILE%\.acro-check\acro-check.env.ps1 and fill in the four values.
+# The scripts load it by themselves when the window has no ACRONIS_* variables set. They look
+# next to the scripts first (git ignores acro-check.env.ps1 there), then in %USERPROFILE%\.acro-check\.
 
 # Data center URL: the start of the console's address, up to .com
 $env:ACRONIS_BASE_URL      = ""

@@ -11,9 +11,10 @@
   Clear alert button), it posts an "Alert cleared" message.
 
   The Clear alert button opens http://localhost:8765/clear on this machine, where this script
-  listens. It dismisses that one alert through the API (DELETE /alerts/{id}). That is the only
-  write this script makes. The link carries a random key kept in the state file, so nothing
-  else can call it. The button works only while this script runs, on this machine.
+  listens, or -ClearUrl when it runs on a server behind a reverse proxy (see the Dockerfile).
+  It dismisses that one alert through the API (DELETE /alerts/{id}). The link carries a random
+  key kept in the state file, so nothing else can call it. The button works only while this
+  script runs. The other write: alerts on a device removed from Acronis are dismissed.
 
   It remembers which alerts it has posted in acronis-alert-bridge.state.json, so a restart
   does not repost them.
@@ -27,6 +28,8 @@
 .PARAMETER DryRun         print the message instead of posting it; the Clear button dismisses nothing
 .PARAMETER Backfill       on first start, also post alerts that already exist (default: skip them)
 .PARAMETER ClearPort      port for the Clear alert button (default 8765)
+.PARAMETER ClearUrl       public URL of the Clear button, for a server (env ACRO_CLEAR_URL)
+.PARAMETER Listen         listener prefix, http://*:8765/ in a container (env ACRO_LISTEN)
 .PARAMETER NoClearButton  post cards without the Clear alert button
 
 .EXAMPLE
@@ -39,8 +42,13 @@ param(
   [string]$WebhookUrl = $env:ACRONIS_ALERT_WEBHOOK,
   [ValidateSet("information", "warning", "error", "critical")] [string]$MinSeverity = "error",
   [int]$IntervalSeconds = 15,
-  [string]$State = "$PSScriptRoot\acronis-alert-bridge.state.json",
+  [string]$State = $env:ACRO_STATE,   # default: acronis-alert-bridge.state.json next to this script
   [int]$ClearPort = 8765,
+  # Public address of the Clear button when the bridge runs on a server behind a reverse proxy,
+  # e.g. https://alerts.example.com/acro-check/clear. Default: http://localhost:<ClearPort>/clear
+  [string]$ClearUrl = $env:ACRO_CLEAR_URL,
+  # What the listener binds. In a container: http://*:8765/. Default: http://localhost:<ClearPort>/
+  [string]$Listen = $env:ACRO_LISTEN,
   [switch]$NoClearButton,
   [switch]$Once,
   [switch]$DryRun,
@@ -49,11 +57,10 @@ param(
 )
 
 $script:RawMode = [bool]$Raw
-# Local settings file (never committed): sets the ACRONIS_* variables if this window hasn't.
-$envFile = Join-Path $PSScriptRoot "acro-check.env.ps1"
-if ((Test-Path $envFile) -and -not $env:ACRONIS_CLIENT_SECRET) { . $envFile; if (-not $WebhookUrl) { $WebhookUrl = $env:ACRONIS_ALERT_WEBHOOK } }
-. "$PSScriptRoot\acronis-common.ps1"
+if (-not $State) { $State = Join-Path $PSScriptRoot "acronis-alert-bridge.state.json" }   # $PSScriptRoot is empty in 5.1 param defaults
+. (Join-Path $PSScriptRoot "acronis-common.ps1")   # also loads acro-check.env.ps1, if present
 if (-not (Get-Command Connect-Acronis -ErrorAction SilentlyContinue)) { throw "acronis-common.ps1 did not load. Check it is next to this script." }
+if (-not $WebhookUrl) { $WebhookUrl = $env:ACRONIS_ALERT_WEBHOOK }
 if (-not $DryRun -and -not $WebhookUrl) { throw "Set -WebhookUrl or the ACRONIS_ALERT_WEBHOOK environment variable, or use -DryRun." }
 
 $rank = @{ ok = 0; information = 1; warning = 2; error = 3; critical = 4 }
@@ -94,7 +101,8 @@ if (-not $clearKey) { $clearKey = [guid]::NewGuid().ToString("N") }
 function Save-State { @{ posted = @($posted.Keys); counts = $counts; clearKey = $clearKey; saved = (Get-Date).ToUniversalTime().ToString("o") } | ConvertTo-Json | Set-Content $State -Encoding utf8 }
 
 $useButton = -not $NoClearButton -and -not $Once
-$clearBase = "http://localhost:$ClearPort/clear"
+$clearBase = if ($ClearUrl) { $ClearUrl.TrimEnd("/") } else { "http://localhost:$ClearPort/clear" }
+if (-not $Listen) { $Listen = "http://localhost:$ClearPort/" }
 
 # ---------------------------------------------------------------------------
 # Message shapes
@@ -256,11 +264,20 @@ function Connect-AndName {
 
 # One status line, rewritten in place each round, so a quiet window stays quiet.
 # Anything worth reading (posted, cleared, errors) clears it first and prints on its own line.
-$script:statusLen = 0; $script:statusText = ""; $script:statusColor = "Green"
+# With no terminal (docker logs, a service, a redirect) a line can't be rewritten, so the status
+# prints as a normal line, and only when it changes (the "Checked" time aside).
+$script:statusLen = 0; $script:statusText = ""; $script:statusColor = "Green"; $script:lastStatus = ""
+$script:plainLog = $false; try { $script:plainLog = [Console]::IsOutputRedirected } catch { }
 function Clear-Status {
   if ($script:statusLen) { Write-Host ("`r" + (" " * $script:statusLen) + "`r") -NoNewline; $script:statusLen = 0 }
 }
 function Show-Status([string]$text, [string]$color = "Green") {
+  if ($script:plainLog) {
+    $k = $text -replace '\s*Checked .*$', ''
+    if ($k -ne $script:lastStatus) { Write-Host "$(Get-Date -Format T)  $k"; $script:lastStatus = $k }
+    $script:statusText = $text; $script:statusColor = $color
+    return
+  }
   Clear-Status
   # Keep it on one line: a wrapped line can't be rewritten in place.
   try { $w = [Console]::WindowWidth - 1; if ($w -gt 10 -and $text.Length -gt $w) { $text = $text.Substring(0, $w) } } catch { }
@@ -440,16 +457,16 @@ foreach ($a in @(Items (Get-Api "/api/alert_manager/v1/alerts" @{ order = "desc(
 $script:listener = $null
 if ($useButton) {
   $script:listener = [System.Net.HttpListener]::new()
-  $script:listener.Prefixes.Add("http://localhost:$ClearPort/")
+  $script:listener.Prefixes.Add($Listen)
   try { $script:listener.Start() }
   catch {
-    Write-Host "Clear alert button off: port $ClearPort is in use ($($_.Exception.Message)). Is another bridge running?" -ForegroundColor DarkYellow
+    Write-Host "Clear alert button off: can't listen on $Listen ($($_.Exception.Message)). Is another bridge running?" -ForegroundColor DarkYellow
     $script:listener = $null; $useButton = $false
   }
 }
 
 $mode = if ($DryRun) { "dry run, nothing posted" } else { "posting to $Target" }
-$btn = if ($useButton) { "Clear alert button on (port $ClearPort)" } else { "no Clear alert button" }
+$btn = if ($useButton) { "Clear alert button on ($clearBase)" } else { "no Clear alert button" }
 Write-Host "Alert bridge: $mode, severity $MinSeverity and up, every $IntervalSeconds s, $btn. Watching $($open.Count) posted alert(s) for clearing. Ctrl+C to stop." -ForegroundColor Green
 
 try {

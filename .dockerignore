@@ -1,0 +1,6 @@
+.git
+docs
+*.md
+*.state.json
+acro-check.env.ps1
+.env

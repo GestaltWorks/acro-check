@@ -5,6 +5,15 @@
 $ErrorActionPreference = "Stop"
 if (-not (Get-Variable RawMode -Scope Script -ErrorAction SilentlyContinue)) { $script:RawMode = $false }
 
+# Settings file (never committed). Sets the ACRONIS_* variables when this window hasn't, so
+# nothing has to be pasted. Looks next to the scripts first, then in the user profile
+# (%USERPROFILE%\.acro-check\), which is where a fresh clone finds it. Pasted values win.
+if (-not $env:ACRONIS_CLIENT_SECRET) {
+  foreach ($f in (Join-Path $PSScriptRoot "acro-check.env.ps1"), (Join-Path (Join-Path $HOME ".acro-check") "acro-check.env.ps1")) {
+    if (Test-Path $f) { . $f; break }
+  }
+}
+
 function Connect-Acronis {
   # Gets a client-credentials token, finds the API client's tenant, then trades the token for a
   # tenant-scoped one. The protection services (agents, resources, policies, alerts, tasks)

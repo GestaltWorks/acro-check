@@ -4,7 +4,11 @@ Sends Acronis Cyber Protect Cloud alerts to a Teams, Slack or Discord channel, a
 
 Acronis has no outgoing webhooks, and Workflow Automation has no "call a URL" action. Without this, alerts leave the console only by email or through a supported PSA. acro-check polls the Alert Manager API every 15 seconds and turns each new alert into a channel card.
 
-One PowerShell script plus a helper file. It needs no install and no admin rights, and runs in Windows PowerShell 5.1 or PowerShell 7.
+One PowerShell script plus a helper file. It runs three ways:
+
+- in Windows PowerShell 5.1 or PowerShell 7 on a PC, with no install and no admin rights
+- in Docker on any server: [Run it on a server](#run-it-on-a-server-docker)
+- as a plain `.ps1` on a Windows Server without Docker
 
 ## What it does
 
@@ -24,14 +28,14 @@ One PowerShell script plus a helper file. It needs no install and no admin right
 2. Create the channel's incoming webhook:
    - **Teams:** in the channel, choose **Workflows > Post to a channel when a webhook request is received**, then copy the URL.
    - **Slack** or **Discord:** create an incoming webhook for the channel.
-3. Open PowerShell in this folder and make your settings file:
+3. Make your settings file in your user profile, where every copy of acro-check finds it (a fresh clone included). Open PowerShell in this folder:
 
    ```powershell
-   Copy-Item .\acro-check.env.example.ps1 .\acro-check.env.ps1
+   New-Item -ItemType Directory -Force "$HOME\.acro-check" | Out-Null; Copy-Item .\acro-check.env.example.ps1 "$HOME\.acro-check\acro-check.env.ps1"
    ```
 
    ```powershell
-   notepad .\acro-check.env.ps1
+   notepad "$HOME\.acro-check\acro-check.env.ps1"
    ```
 
    Fill in the four values:
@@ -40,7 +44,7 @@ One PowerShell script plus a helper file. It needs no install and no admin right
    - the Secret
    - the webhook URL
 
-   Git ignores `acro-check.env.ps1`, so the values never reach the repo.
+   The scripts look for `acro-check.env.ps1` next to themselves first, then in `%USERPROFILE%\.acro-check\`. Values already set in the window win over both. Git ignores `acro-check.env.ps1` in this folder, so the values never reach the repo.
 4. Check it without posting anything:
 
    ```powershell
@@ -63,7 +67,60 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Ctrl+C stops it. On its first start it marks the alerts that already exist as seen and posts only new ones (`-Backfill` posts the existing ones too).
 
-The Clear alert button only works while the bridge runs, and only on the PC running it.
+On a PC the Clear alert button opens `localhost`, so it works only on the PC running the bridge, and only while it runs. On a server it gets a public address: see below.
+
+## Run it on a server (Docker)
+
+The image is the official PowerShell image with the two scripts. You build it straight from this repo, so there's no registry and nothing to clone.
+
+1. On the server, put the settings in `~/.acro-check/.env` (format in [.env.example](.env.example)), then:
+
+   ```bash
+   chmod 600 ~/.acro-check/.env
+   ```
+
+2. Build and start it:
+
+   ```bash
+   docker build -t acro-check https://github.com/GestaltWorks/acro-check.git
+   ```
+
+   ```bash
+   docker run -d --name acro-check --restart unless-stopped --env-file ~/.acro-check/.env -p 127.0.0.1:8765:8765 -v acro-check-data:/data acro-check
+   ```
+
+3. Watch it:
+
+   ```bash
+   docker logs -f acro-check
+   ```
+
+The Clear alert button needs a public HTTPS address. Point a reverse proxy at `127.0.0.1:8765`, and set `ACRO_CLEAR_URL` in the `.env` to the matching public URL. For nginx, inside the site's `server { }` block:
+
+```nginx
+location /acro-check/ {
+    proxy_pass http://127.0.0.1:8765/;
+}
+```
+
+The bridge only answers `/clear` links that carry its random key, for alerts it posted that are still open. Everything else gets a 404.
+
+State (posted alerts, repeat counts, the Clear key) lives on the `acro-check-data` volume, so restarts and rebuilds don't repost. To start over:
+
+```bash
+docker rm -f acro-check && docker volume rm acro-check-data
+```
+
+Container settings, all in the `.env`:
+
+| Variable | What it is |
+|---|---|
+| `ACRONIS_BASE_URL`, `ACRONIS_CLIENT_ID`, `ACRONIS_CLIENT_SECRET` | The API client |
+| `ACRONIS_ALERT_WEBHOOK` | The channel's webhook |
+| `ACRO_CLEAR_URL` | Public URL of the Clear button, ending in `/clear` |
+| `TZ` | Time zone for card times, for example `America/New_York` (UTC if unset) |
+
+The image already sets `ACRO_LISTEN=http://*:8765/` and `ACRO_STATE=/data/acronis-alert-bridge.state.json`. To pass options, put them after the image name, for example `... acro-check -Target slack -MinSeverity warning`.
 
 ### Parameters
 
@@ -73,8 +130,10 @@ The Clear alert button only works while the bridge runs, and only on the PC runn
 | `-MinSeverity` | `error` | Lowest severity posted: `information`, `warning`, `error`, `critical` |
 | `-IntervalSeconds` | `15` | Seconds between checks |
 | `-WebhookUrl` | `$env:ACRONIS_ALERT_WEBHOOK` | Overrides the webhook from the settings file |
-| `-State` | `acronis-alert-bridge.state.json` next to the script | Where it remembers what it posted |
+| `-State` | `$env:ACRO_STATE`, else `acronis-alert-bridge.state.json` next to the script | Where it remembers what it posted |
 | `-ClearPort` | `8765` | Local port for the Clear alert button |
+| `-ClearUrl` | `$env:ACRO_CLEAR_URL`, else `http://localhost:8765/clear` | The address the card's button opens |
+| `-Listen` | `$env:ACRO_LISTEN`, else `http://localhost:8765/` | What the listener binds (`http://*:8765/` in the container) |
 | `-NoClearButton` | off | Posts cards without the Clear alert button |
 | `-Once` | off | Checks one time and exits |
 | `-DryRun` | off | Prints cards instead of posting them, and dismisses nothing |
@@ -160,8 +219,9 @@ tenant         David Braun
 
 | What | Where | Committed |
 |---|---|---|
-| Credentials and webhook | `acro-check.env.ps1` | No (git ignores it) |
-| Posted alerts, repeat counts, Clear button key | `acronis-alert-bridge.state.json` | No (git ignores it) |
+| Credentials and webhook (PC) | `%USERPROFILE%\.acro-check\acro-check.env.ps1` | No (outside the repo) |
+| Credentials and webhook (server) | `~/.acro-check/.env` | No (outside the repo) |
+| Posted alerts, repeat counts, Clear button key | `acronis-alert-bridge.state.json`, or the `acro-check-data` volume | No (git ignores it) |
 | Dismiss one alert | Acronis, `DELETE /api/alert_manager/v1/alerts/{id}` | n/a |
 
 The bridge reads Acronis and posts to the channel. It changes Acronis only in two cases:
@@ -176,14 +236,16 @@ In both cases it dismisses that one alert and nothing else.
 |---|---|
 | `acronis-alert-bridge.ps1` | The bridge |
 | `acronis-common.ps1` | Shared helpers: sign in, GET with readable errors, list unwrapping |
-| `acro-check.env.example.ps1` | Template for your settings file |
+| `acro-check.env.example.ps1` | Template for the PC settings file |
+| `Dockerfile`, `.env.example` | The container, and the template for its settings |
 | [docs/how-it-works.md](docs/how-it-works.md) | The poll loop, state, repeat counting, Clear button, removed devices, root cause |
 | [docs/acronis-api-notes.md](docs/acronis-api-notes.md) | Acronis API behavior learned building this, with the gotchas |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Symptoms, causes and fixes |
 
 ## Limits
 
-- The Clear alert button opens `localhost`, so it works only on the PC running the bridge. A team would host it behind a reachable URL, or use a Teams bot instead of a Workflows webhook.
+- On a PC the Clear alert button opens `localhost`, so it works only there. Run it on a server with `ACRO_CLEAR_URL` for a button that works for everyone in the channel.
+- Anyone who has a card can use its Clear button. That's the point in a team channel, but the key travels inside the card.
 - Repeat counts start when the bridge first sees an alert. Acronis keeps no count, so repeats from before that aren't counted.
 - Polling every 15 seconds means a card arrives up to 15 seconds after the alert.
 - Teams Workflows webhooks can't edit a card after posting it, so clearing posts a second card instead of updating the first.

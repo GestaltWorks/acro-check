@@ -1,0 +1,4 @@
+# Local settings with real credentials and the webhook URL. Never commit.
+acro-check.env.ps1
+# Runtime state: posted alerts, repeat counts, and the Clear button key.
+*.state.json

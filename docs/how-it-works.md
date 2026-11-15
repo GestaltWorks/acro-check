@@ -71,7 +71,9 @@ The card's button is an `Action.OpenUrl` to:
 http://localhost:8765/clear?id=<alert ID>&k=<key>
 ```
 
-The bridge runs a `System.Net.HttpListener` on `http://localhost:8765/`. Binding to `localhost` needs no admin rights. Between polls, `Wait-Next` waits on `GetContextAsync()` in 500 ms steps, so a click is answered within half a second.
+On a server, `-ClearUrl` (env `ACRO_CLEAR_URL`) replaces that address with a public one, for example `https://alerts.example.com/acro-check/clear`. A reverse proxy forwards `/acro-check/` to the container's port 8765, which strips the prefix back to `/clear`.
+
+The bridge runs a `System.Net.HttpListener` on `http://localhost:8765/`, or on `-Listen` (env `ACRO_LISTEN`). In the container that's `http://*:8765/`. Binding to `localhost` needs no admin rights. Between polls, `Wait-Next` waits on `GetContextAsync()` in 500 ms steps, so a click is answered within half a second.
 
 A request is accepted only when all of these hold:
 

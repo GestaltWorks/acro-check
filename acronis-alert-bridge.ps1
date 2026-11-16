@@ -410,16 +410,18 @@ function Invoke-Poll {
 # ---------------------------------------------------------------------------
 # Clear alert button: a listener on localhost that dismisses one posted alert
 # ---------------------------------------------------------------------------
-function Send-Page($ctx, [int]$code, [string]$heading, [string]$text) {
+function Send-Page($ctx, [int]$code, [string]$heading, [string]$text, [string]$extra = "", [bool]$autoClose = $true) {
   $html = "<!doctype html><meta charset=utf-8><title>Acronis alert bridge</title>" +
           "<body style='font-family:Segoe UI,sans-serif;background:#f4f6f8;color:#1b2733;display:grid;place-items:center;height:100vh;margin:0'>" +
           "<div style='background:#fff;padding:32px 40px;border-radius:12px;box-shadow:0 2px 12px #0001;max-width:520px'>" +
-          "<h1 style='margin:0 0 8px;font-size:22px'>$heading</h1><p style='margin:0;font-size:16px;line-height:1.5'>$text</p></div>" +
-          "<script>setTimeout(function(){window.close()},2500)</script>"
-  $bytes = [Text.Encoding]::UTF8.GetBytes($html)
+          "<h1 style='margin:0 0 8px;font-size:22px'>$heading</h1><p style='margin:0;font-size:16px;line-height:1.5'>$text</p>$extra</div>" +
+          $(if ($autoClose) { "<script>setTimeout(function(){window.close()},2500)</script>" } else { "" })
   $ctx.Response.StatusCode = $code
   $ctx.Response.ContentType = "text/html; charset=utf-8"
-  $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+  if ($ctx.Request.HttpMethod -ne "HEAD") {
+    $bytes = [Text.Encoding]::UTF8.GetBytes($html)
+    $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+  }
   $ctx.Response.Close()
 }
 
@@ -431,6 +433,16 @@ function Invoke-ClearRequest($ctx) {
     Send-Page $ctx 404 "Not found" "This link isn't one the alert bridge made."; return
   }
   if (-not $open.ContainsKey($id)) { Send-Page $ctx 200 "Already cleared" "This alert is already cleared, or it isn't one the bridge posted."; return }
+
+  # Only a POST dismisses. Teams' link preview (SkypeUriPreview) fetches every card URL seconds after
+  # posting; a GET or HEAD gets the confirm page, so only a person pressing the button clears the alert.
+  if ($ctx.Request.HttpMethod -ne "POST") {
+    $title = [System.Net.WebUtility]::HtmlEncode((Get-Title $open[$id]))
+    $form = "<form method='post' style='margin-top:24px'><button type='submit' style='font:600 16px Segoe UI,sans-serif;" +
+            "background:#c4314b;color:#fff;border:0;border-radius:8px;padding:10px 22px;cursor:pointer'>Clear alert</button></form>"
+    Send-Page $ctx 200 "Clear this alert?" "<b>$title</b><br>Pressing the button dismisses it in Acronis." $form $false
+    return
+  }
 
   if ($DryRun) {
     Write-Host "$(Get-Date -Format T)  dry run: Clear alert clicked for $id, nothing dismissed" -ForegroundColor Yellow

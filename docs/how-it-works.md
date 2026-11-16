@@ -11,7 +11,7 @@ start
   └─ every 15 s:
        1. GET open alerts
        2. drop alerts whose device was removed (and dismiss them)
-       3. post new occurrences at or above -MinSeverity
+       3. post new occurrences at or above -MinSeverity, plus malware and $alwaysPost types
        4. post "cleared" for posted alerts that are no longer open
        5. save state, rewrite the status line
      between rounds: answer Clear button clicks
@@ -37,7 +37,7 @@ Acronis reuses an alert's ID when the same problem comes back: it reopens the al
 
 So the bridge keys each **occurrence** as `ID|createdAt`, with the time cut to the second in UTC (`yyyy-MM-ddTHH:mm:ss`). PowerShell 7 parses dates in JSON into DateTime objects, while 5.1 leaves them as strings. `Get-Key` normalizes both, so a state file written by one version works in the other.
 
-An alert is new when its occurrence key isn't in `posted` and its severity is at or above `-MinSeverity`.
+An alert is new when its occurrence key isn't in `posted` and `Test-Send` passes: its severity (after `Get-Sev` promotes malware detections to critical) is at or above `-MinSeverity`, or its type is in `$alwaysPost`. That list holds the warnings that mean a missed or weakened protection: `BackupDidNotStart`, `BackupStatusUnknown` and `MiMonitoringAntimalwareDefinitionsOutdated`. They post at their own severity, as yellow cards.
 
 ## Repeat counting
 

@@ -14,7 +14,7 @@
 | Every alert posts twice | Two bridges run against the same channel (a PC window and the container) | Stop one |
 | "This link isn't one the alert bridge made." | The state file was deleted, so the key changed, and the card is older than that | Clear the alert in the console. New cards get working buttons |
 | Cards made before a restart have no Clear button | Those cards were posted by an older version | Nothing to fix. Posted cards can't be edited |
-| A repeat wasn't posted | Its severity is below `-MinSeverity` (default `error`) | `-MinSeverity warning` to include warnings |
+| A repeat wasn't posted | Its severity is below `-MinSeverity` (default `error`) and its type isn't in `$alwaysPost` | `-MinSeverity warning` to include every warning, or add the type to `$alwaysPost` in the script |
 | The status line counts an alert that is gone from the console | The device was removed. The bridge clears it on its next round | Wait one round (15 s). If it stays, check the window for `auto-clear failed` |
 | The status line jumps to a new line | The window is narrower than the line was when it was written | Widen the window; the next round writes a clean line |
 | `GET ... skipped: HTTP 5xx` | Acronis hiccup | Nothing. The round is skipped and the next one retries |

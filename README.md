@@ -19,7 +19,7 @@ One PowerShell script plus a helper file. It runs three ways:
 | Clear alert button | A button on the card that opens a confirm page; its Clear alert button dismisses that one alert in Acronis. Link previews (Teams fetches every card link) only see the page, so they can't clear anything |
 | Repeat alert | The card says "repeat (N times)", with "times seen" and "first reported" |
 | Removed device | Alerts on a device that no longer exists in Acronis are cleared automatically |
-| Severity filter | Only error and critical alerts post by default; warnings stay out of the channel. Malware detections always post: Acronis rates a quarantined one "warning", so the bridge treats security detections as critical |
+| Severity filter | Error and critical alerts post by default. Malware detections always post as critical: Acronis rates a quarantined one "warning". Three warnings that mean a missed or weakened protection always post as yellow cards: `BackupDidNotStart`, `BackupStatusUnknown`, `MiMonitoringAntimalwareDefinitionsOutdated`. Performance anomalies (disk speed, disk space, GPU temperature) stay out |
 | Quiet window | One status line, rewritten in place: green Ready, yellow for warnings, red for error or critical |
 
 ## Set up (about 10 minutes, once)
@@ -127,7 +127,7 @@ The image already sets `ACRO_LISTEN=http://*:8765/` and `ACRO_STATE=/data/acroni
 | Parameter | Default | What it does |
 |---|---|---|
 | `-Target` | `teams` | Message format: `teams`, `slack` or `discord` |
-| `-MinSeverity` | `error` | Lowest severity posted: `information`, `warning`, `error`, `critical` |
+| `-MinSeverity` | `error` | Lowest severity posted: `information`, `warning`, `error`, `critical`. Malware detections and the three protection warnings post at any setting |
 | `-IntervalSeconds` | `15` | Seconds between checks |
 | `-WebhookUrl` | `$env:ACRONIS_ALERT_WEBHOOK` | Overrides the webhook from the settings file |
 | `-State` | `$env:ACRO_STATE`, else `acronis-alert-bridge.state.json` next to the script | Where it remembers what it posted |

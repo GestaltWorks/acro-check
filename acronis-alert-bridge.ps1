@@ -23,7 +23,8 @@
   Acronis credentials: same three environment variables as the other scripts.
 
 .PARAMETER Target         teams | slack | discord   (shape of the message)
-.PARAMETER MinSeverity    information | warning | error | critical   (default error: only error and critical reach the channel)
+.PARAMETER MinSeverity    information | warning | error | critical   (default error: error and critical reach the channel, plus malware detections and the
+                          three protection warnings in $alwaysPost)
 .PARAMETER Once           check one time and exit, instead of polling
 .PARAMETER DryRun         print the message instead of posting it; the Clear button dismisses nothing
 .PARAMETER Backfill       on first start, also post alerts that already exist (default: skip them)
@@ -82,6 +83,15 @@ function Get-Sev($a) {
   if ((Test-Security $a) -and $rank[$s] -lt $rank["critical"]) { return "critical" }
   return $s
 }
+
+# Warnings that mean a missed or weakened protection. They post whatever -MinSeverity says,
+# at their own severity (a yellow card). Performance anomalies (disk speed, GPU temperature) stay out.
+$alwaysPost = @(
+  "BackupDidNotStart",                            # the scheduled backup never ran: no new restore point
+  "BackupStatusUnknown",                          # Acronis can't tell whether the backup worked
+  "MiMonitoringAntimalwareDefinitionsOutdated"    # protection running on old signatures
+)
+function Test-Send($a) { ($rank[(Get-Sev $a)] -ge $minRank) -or ($alwaysPost -contains [string]$a.type) }
 
 # ---------------------------------------------------------------------------
 # State: alert ids already posted, and the key that guards the Clear button
@@ -351,7 +361,7 @@ function Invoke-Poll {
   $alerts = @(Clear-Orphans @(Items $resp))
   $active = @{}
   foreach ($a in $alerts) { $active[[string]$a.id] = $a }
-  $new = @($alerts | Where-Object { -not $posted[(Get-Key $_)] -and $rank[(Get-Sev $_)] -ge $minRank })
+  $new = @($alerts | Where-Object { -not $posted[(Get-Key $_)] -and (Test-Send $_) })
 
   # Count each new occurrence once, before its card is built (the card shows the count).
   # A failed post is retried next round; $countedKeys stops it being counted twice.
@@ -396,9 +406,9 @@ function Invoke-Poll {
   if (-not $DryRun) { Save-State }
   # Status line: green "Ready" when nothing is open, else the count in the color of the worst open alert.
   $at = Get-Date -Format T
-  # Alerts below -MinSeverity are counted here but never sent to the channel.
-  $sent  = @($alerts | Where-Object { $rank[(Get-Sev $_)] -ge $minRank })
-  $below = @($alerts | Where-Object { $rank[(Get-Sev $_)] -lt $minRank })
+  # Alerts below -MinSeverity (and not in $alwaysPost) are counted here but never sent to the channel.
+  $sent  = @($alerts | Where-Object { Test-Send $_ })
+  $below = @($alerts | Where-Object { -not (Test-Send $_) })
   $pick  = if ($sent.Count) { $sent } else { $below }
   $worst = if ($pick.Count) { Get-Sev @($pick | Sort-Object { $rank[(Get-Sev $_)] } -Descending)[0] } else { "" }
   $c = $consoleColor[$worst]; if (-not $c) { $c = "Green" }
@@ -499,7 +509,7 @@ if ($useButton) {
 
 $mode = if ($DryRun) { "dry run, nothing posted" } else { "posting to $Target" }
 $btn = if ($useButton) { "Clear alert button on ($clearBase)" } else { "no Clear alert button" }
-Write-Host "Alert bridge: $mode, severity $MinSeverity and up, every $IntervalSeconds s, $btn. Watching $($open.Count) posted alert(s) for clearing. Ctrl+C to stop." -ForegroundColor Green
+Write-Host "Alert bridge: $mode, severity $MinSeverity and up plus malware and $($alwaysPost.Count) protection warnings, every $IntervalSeconds s, $btn. Watching $($open.Count) posted alert(s) for clearing. Ctrl+C to stop." -ForegroundColor Green
 
 try {
   while ($true) {

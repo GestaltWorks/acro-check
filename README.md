@@ -16,7 +16,7 @@ One PowerShell script plus a helper file. It runs three ways:
 |---|---|
 | New alert | A card with the device, plan, root cause, severity and time, colored by severity |
 | Alert clears | A green "Acronis alert cleared" card saying who cleared it and how long it was open |
-| Clear alert button | A button on the card that dismisses that one alert in Acronis |
+| Clear alert button | A button on the card that opens a confirm page; its Clear alert button dismisses that one alert in Acronis. Link previews (Teams fetches every card link) only see the page, so they can't clear anything |
 | Repeat alert | The card says "repeat (N times)", with "times seen" and "first reported" |
 | Removed device | Alerts on a device that no longer exists in Acronis are cleared automatically |
 | Severity filter | Only error and critical alerts post by default; warnings stay out of the channel. Malware detections always post: Acronis rates a quarantined one "warning", so the bridge treats security detections as critical |

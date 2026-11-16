@@ -8,6 +8,7 @@
 | `post failed: ... 400` from Teams | The Workflow isn't "Post to a channel when a webhook request is received", or the URL was cut off | Copy the whole URL again from the Workflow |
 | `Clear alert button off: port 8765 is in use` | Another bridge window is running | Close the other window, or use `-ClearPort 8766` |
 | Clear button opens a page that won't load | The bridge isn't running. On a PC, or it runs on a different PC | Start it. On a PC the button only works there: run it on a server with `ACRO_CLEAR_URL` |
+| An alert clears itself seconds after its card posts, "cleared by the Clear alert button", and nobody clicked. The console shows nothing open | Teams' link preview (`SkypeUriPreview` in the nginx access log) opened the Clear link, and a bridge older than 5d6f13a dismissed on any request | Rebuild from the repo. The link now opens a confirm page, and only its button clears the alert |
 | Clear button gives `502 Bad Gateway` | The reverse proxy can't reach the container | `docker ps` shows `acro-check` up with `127.0.0.1:8765->8765/tcp`. If not, `docker start acro-check` |
 | Card times are 5 hours off | The container has no `TZ` | Add `TZ=<your zone>` to the `.env`, then `docker rm -f acro-check` and run it again |
 | Every alert posts twice | Two bridges run against the same channel (a PC window and the container) | Stop one |

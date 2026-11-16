@@ -84,7 +84,9 @@ A request is accepted only when all of these hold:
 | `id` is a GUID | No injection into the API path |
 | The ID is in `open` | It only clears alerts it posted and that are still open |
 
-Then it sends `DELETE /api/alert_manager/v1/alerts/{id}` and shows a small page that closes itself. It also runs a poll straight away, so the cleared card follows within seconds. If Acronis answers 404, the alert was already cleared, and the page says so.
+A GET (or HEAD) answers with a confirm page: the alert's title and a **Clear alert** button, a form that POSTs back to the same URL. Only that POST dismisses the alert. Teams' link preview (user agent `SkypeUriPreview`) fetches every URL on a card 6 to 9 seconds after it posts; before this, that fetch counted as a click, and every alert was dismissed in Acronis seconds after its card posted.
+
+On the POST it sends `DELETE /api/alert_manager/v1/alerts/{id}` and shows a small page that closes itself. It also runs a poll straight away, so the cleared card follows within seconds. If Acronis answers 404, the alert was already cleared, and the page says so.
 
 Never call `DELETE /api/alert_manager/v1/alerts` without an ID: that dismisses every alert in the tenant.
 

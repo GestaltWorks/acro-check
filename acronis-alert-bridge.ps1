@@ -75,7 +75,7 @@ $cardColor    = @{ critical = "Attention"; error = "Attention"; warning = "Warni
 # a routine warning, so security alerts count as critical for the filter and the colors.
 function Test-Security($a) {
   ([string]$a.category -match 'Antimalware|Active Protection|Security') -or
-  ([string]$a.type -match 'Malware|Ransomware|Cryptomin|Exploit|Threat')
+  ([string]$a.type -match '(?<!Anti)Malware|Ransomware|Cryptomin|Exploit|Threat')   # (?<!Anti): MiMonitoringAntimalwareDefinitionsOutdated is a monitoring warning, not a detection
 }
 function Get-Sev($a) {
   $s = [string]$a.severity
